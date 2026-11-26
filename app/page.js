@@ -1,6 +1,7 @@
 ﻿"use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { supabase } from "../lib/supabaseClient";
 
 const QUICK_COUNTS = [5, 10, 25, 50, 100];
 
@@ -17,6 +18,14 @@ const LEVEL_LABELS = {
 };
 
 export default function HomePage() {
+  const [user, setUser] = useState(null);
+  const [authMode, setAuthMode] = useState("login");
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authMessage, setAuthMessage] = useState("");
+  const [authError, setAuthError] = useState("");
+
   const [activeTab, setActiveTab] = useState("explain");
   const [studentQuestion, setStudentQuestion] = useState("");
   const [englishInput, setEnglishInput] = useState("");
@@ -32,6 +41,85 @@ export default function HomePage() {
   const [englishResult, setEnglishResult] = useState(null);
   const [selectedAnswers, setSelectedAnswers] = useState({});
   const [revealedQuestions, setRevealedQuestions] = useState({});
+
+  useEffect(() => {
+    if (!supabase) return;
+
+    let mounted = true;
+    supabase.auth.getSession().then(({ data: sessionData }) => {
+      if (mounted) {
+        setUser(sessionData?.session?.user || null);
+      }
+    });
+
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user || null);
+    });
+
+    return () => {
+      mounted = false;
+      listener?.subscription?.unsubscribe();
+    };
+  }, []);
+
+  async function handleAuthSubmit(e) {
+    e.preventDefault();
+    setAuthError("");
+    setAuthMessage("");
+
+    if (!supabase) {
+      setAuthError(
+        "Supabase wali lama xiriirin. Fadlan hubi NEXT_PUBLIC_SUPABASE_URL iyo NEXT_PUBLIC_SUPABASE_ANON_KEY ee .env.local."
+      );
+      return;
+    }
+
+    if (!authEmail.trim() || !authPassword.trim()) {
+      setAuthError("Fadlan geli email-ka iyo password-ka.");
+      return;
+    }
+
+    setAuthLoading(true);
+    try {
+      if (authMode === "register") {
+        const { error: signUpError } = await supabase.auth.signUp({
+          email: authEmail.trim(),
+          password: authPassword,
+        });
+        if (signUpError) {
+          setAuthError(signUpError.message);
+        } else {
+          setAuthMessage(
+            "Akoonkaaga waa la diiwaangeliyay! Haddii email confirmation uu furan yahay, hubi email-kaaga."
+          );
+          setAuthPassword("");
+        }
+      } else {
+        const { error: signInError } = await supabase.auth.signInWithPassword({
+          email: authEmail.trim(),
+          password: authPassword,
+        });
+        if (signInError) {
+          setAuthError(signInError.message);
+        } else {
+          setAuthMessage("Waad soo gashay akoonkaaga.");
+          setAuthPassword("");
+        }
+      }
+    } catch {
+      setAuthError("Khalad ayaa dhacay intii la socday xaqiijinta akoonka.");
+    } finally {
+      setAuthLoading(false);
+    }
+  }
+
+  async function handleSignOut() {
+    if (!supabase) return;
+    setAuthError("");
+    setAuthMessage("");
+    await supabase.auth.signOut();
+    setAuthMessage("Waad ka baxday akoonka.");
+  }
 
   function handleCountChange(val) {
     const num = Number.parseInt(String(val), 10);
@@ -180,6 +268,111 @@ export default function HomePage() {
           </button>
         )}
       </header>
+
+      <section className="card" style={{ marginBottom: "20px" }}>
+        {user ? (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: "12px",
+              flexWrap: "wrap",
+            }}
+          >
+            <div>
+              <p className="direct-answer-label">Akoonka Ardayga (Authenticated)</p>
+              <p className="summary-text" style={{ margin: 0, fontWeight: 700 }}>
+                Waxaad ku jirtaa: {user.email}
+              </p>
+            </div>
+            <button type="button" onClick={handleSignOut} className="btn-secondary">
+              Ka bax (Sign Out)
+            </button>
+          </div>
+        ) : (
+          <div>
+            <div className="mode-tabs" style={{ marginBottom: "12px" }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthMode("login");
+                  setAuthError("");
+                  setAuthMessage("");
+                }}
+                className={`mode-tab-btn ${authMode === "login" ? "active" : ""}`}
+              >
+                Soo Gal (Login)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthMode("register");
+                  setAuthError("");
+                  setAuthMessage("");
+                }}
+                className={`mode-tab-btn ${authMode === "register" ? "active" : ""}`}
+              >
+                Is-Diiwaangeli (Register)
+              </button>
+            </div>
+
+            <form
+              onSubmit={handleAuthSubmit}
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+                gap: "10px",
+                alignItems: "center",
+              }}
+            >
+              <input
+                type="email"
+                placeholder="Email-ka ardayga"
+                value={authEmail}
+                onChange={(e) => setAuthEmail(e.target.value)}
+                className="select-input"
+              />
+              <input
+                type="password"
+                placeholder="Password (ugu yaraan 6 xaraf)"
+                value={authPassword}
+                onChange={(e) => setAuthPassword(e.target.value)}
+                className="select-input"
+              />
+              <button type="submit" disabled={authLoading} className="btn-primary">
+                {authLoading
+                  ? "Fadlan sug..."
+                  : authMode === "register"
+                  ? "Samee Akoon (Register)"
+                  : "Soo Gal (Login)"}
+              </button>
+            </form>
+          </div>
+        )}
+
+        {authError && (
+          <div className="error-banner" style={{ marginTop: "12px" }}>
+            {authError}
+          </div>
+        )}
+        {authMessage && (
+          <div
+            style={{
+              marginTop: "12px",
+              padding: "10px 14px",
+              borderRadius: "10px",
+              background: "#ecfdf5",
+              border: "1px solid #a7f3d0",
+              color: "#065f46",
+              fontSize: "13.5px",
+              fontWeight: 600,
+            }}
+          >
+            {authMessage}
+          </div>
+        )}
+      </section>
 
       <form onSubmit={handleSubmit} className="card form-card">
         <div className="mode-tabs">
