@@ -10,9 +10,17 @@ const LANGUAGE_LABELS = {
   english: "English",
 };
 
+const LEVEL_LABELS = {
+  beginner: "Bilow (Beginner)",
+  intermediate: "Dhexdhexaad (Intermediate)",
+  advanced: "Sare (Advanced)",
+};
+
 export default function HomePage() {
   const [activeTab, setActiveTab] = useState("explain");
   const [studentQuestion, setStudentQuestion] = useState("");
+  const [englishInput, setEnglishInput] = useState("");
+  const [level, setLevel] = useState("intermediate");
   const [file, setFile] = useState(null);
   const [inputKey, setInputKey] = useState(0);
   const [questionCount, setQuestionCount] = useState(10);
@@ -21,6 +29,7 @@ export default function HomePage() {
   const [error, setError] = useState("");
   const [data, setData] = useState(null);
   const [explanationResult, setExplanationResult] = useState(null);
+  const [englishResult, setEnglishResult] = useState(null);
   const [selectedAnswers, setSelectedAnswers] = useState({});
   const [revealedQuestions, setRevealedQuestions] = useState({});
 
@@ -38,10 +47,16 @@ export default function HomePage() {
     setError("");
     setData(null);
     setExplanationResult(null);
+    setEnglishResult(null);
     setSelectedAnswers({});
     setRevealedQuestions({});
 
-    if (activeTab === "explain") {
+    if (activeTab === "english_learn") {
+      if (!englishInput.trim() && !file) {
+        setError("Fadlan qor qoraal/jumlad/erey Ingiriisi ah ama soo geli fayl.");
+        return;
+      }
+    } else if (activeTab === "explain") {
       if (!studentQuestion.trim()) {
         setError("Fadlan qor su'aasha aad rabto in laguu sharraxo oo laguu fahamsiiyo.");
         return;
@@ -61,7 +76,10 @@ export default function HomePage() {
       if (file) {
         formData.append("file", file);
       }
-      if (activeTab === "explain") {
+      if (activeTab === "english_learn") {
+        formData.append("englishInput", englishInput.trim());
+        formData.append("level", level);
+      } else if (activeTab === "explain") {
         formData.append("studentQuestion", studentQuestion.trim());
       } else {
         formData.append("questionCount", String(finalCount));
@@ -75,6 +93,8 @@ export default function HomePage() {
       const json = await res.json();
       if (!res.ok) {
         setError(json.error || "Waxba lagama soo saari waayay.");
+      } else if (activeTab === "english_learn") {
+        setEnglishResult(json);
       } else if (activeTab === "explain") {
         setExplanationResult(json);
       } else {
@@ -100,10 +120,12 @@ export default function HomePage() {
   function handleReset() {
     setFile(null);
     setStudentQuestion("");
+    setEnglishInput("");
     setInputKey((k) => k + 1);
     setError("");
     setData(null);
     setExplanationResult(null);
+    setEnglishResult(null);
     setSelectedAnswers({});
     setRevealedQuestions({});
   }
@@ -132,20 +154,27 @@ export default function HomePage() {
     ? explanationResult.key_takeaways
     : [];
 
+  const vocabList = Array.isArray(englishResult?.vocabulary)
+    ? englishResult.vocabulary
+    : [];
+  const practiceExamples = Array.isArray(englishResult?.practice_examples)
+    ? englishResult.practice_examples
+    : [];
+
   return (
     <main className="app-container">
       <header className="card hero-header">
         <div>
-          <span className="badge">AI Study Studio • Direct Explanation &amp; Quiz</span>
+          <span className="badge">AI Study Studio • Explanation, English &amp; Quiz</span>
           <h1 className="hero-title">AI Study Summary &amp; Quiz</h1>
           <p className="hero-subtitle">
-            Weydii su&apos;aal toos ah si aad u hesho <strong>faahfaahin buuxda iyo faham cad</strong>{" "}
-            (iyadoo aan lahayn doorashooyin), ama soo geli fayl <strong>.pdf</strong> /{" "}
-            <strong>.docx</strong> si aad u hesho koobid iyo su&apos;aalo.
+            Weydii su&apos;aal toos ah oo <strong>aan doorasho lahayn</strong>, baro{" "}
+            <strong>Ingiriisiga (English → Somali)</strong> heer kasta, ama soo geli fayl{" "}
+            <strong>.pdf</strong> / <strong>.docx</strong> si aad u hesho koobid iyo su&apos;aalo.
           </p>
         </div>
 
-        {(data || explanationResult || file || studentQuestion || error) && (
+        {(data || explanationResult || englishResult || file || studentQuestion || englishInput || error) && (
           <button type="button" onClick={handleReset} className="btn-secondary">
             Dib u bilow
           </button>
@@ -162,7 +191,17 @@ export default function HomePage() {
             }}
             className={`mode-tab-btn ${activeTab === "explain" ? "active" : ""}`}
           >
-            Su&apos;aal &amp; Sharraxaad Toos Ah (Aan Doorasho Lahayn)
+            Su&apos;aal &amp; Sharraxaad Toos Ah
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab("english_learn");
+              setError("");
+            }}
+            className={`mode-tab-btn ${activeTab === "english_learn" ? "active" : ""}`}
+          >
+            Barashada English (EN → SO)
           </button>
           <button
             type="button"
@@ -175,6 +214,24 @@ export default function HomePage() {
             Summary &amp; Su&apos;aalo Doorasho Ah
           </button>
         </div>
+
+        {activeTab === "english_learn" && (
+          <div className="option-box">
+            <label htmlFor="english-input" className="option-label">
+              Qor Erey, Jumlad, ama Qoraal Ingiriisi Ah (Si Loogu Turjumo &amp; Loo Sharraxo)
+            </label>
+            <textarea
+              id="english-input"
+              value={englishInput}
+              onChange={(e) => setEnglishInput(e.target.value)}
+              placeholder="Tusaale: Consistency compounds over time, even when progress feels slow at first."
+              className="question-textarea"
+            />
+            <p className="option-hint">
+              Wuxuu u turjumayaa Af-Soomaali cad, sharraxaya naxwaha &amp; ereyada, wuxuuna ku siinayaa tusaalooyin ku habboon heerka ardayga.
+            </p>
+          </div>
+        )}
 
         {activeTab === "explain" && (
           <div className="option-box">
@@ -197,16 +254,16 @@ export default function HomePage() {
         <div className="drop-zone">
           <div>
             <p className="drop-zone-title">
-              {activeTab === "explain"
-                ? "Fayl Tixraac Ah (.pdf ama .docx — Ikhtiyaari)"
-                : "Dooro Faylka Waxbarashada (.pdf ama .docx)"}
+              {activeTab === "quiz"
+                ? "Dooro Faylka Waxbarashada (.pdf ama .docx)"
+                : "Fayl Tixraac Ah (.pdf ama .docx — Ikhtiyaari)"}
             </p>
             <p className="drop-zone-meta">
               {file
                 ? `La doortay: ${file.name} (${fileSizeMb})`
-                : activeTab === "explain"
-                ? "Waxaad ku xiri kartaa fayl haddii su'aashu ka timaaddo dukumiinti gaar ah"
-                : "Ugu badnaan 100 MB • Qoraal, xisaab, ama sawirro ha lahaado"}
+                : activeTab === "quiz"
+                ? "Ugu badnaan 100 MB • Qoraal, xisaab, ama sawirro ha lahaado"
+                : "Waxaad ku xiri kartaa fayl haddii aad rabto in laga soo qaato xog ama qoraal"}
             </p>
           </div>
           <input
@@ -234,7 +291,9 @@ export default function HomePage() {
             <div className="file-meta-item">
               <span className="file-meta-label">Xulashada</span>
               <span className="file-meta-value">
-                {activeTab === "explain"
+                {activeTab === "english_learn"
+                  ? `English → Somali • ${LEVEL_LABELS[level] || level}`
+                  : activeTab === "explain"
                   ? `Sharraxaad Toos Ah • ${LANGUAGE_LABELS[language] || language}`
                   : `${questionCount} Su'aal • ${LANGUAGE_LABELS[language] || language}`}
               </span>
@@ -243,6 +302,27 @@ export default function HomePage() {
         )}
 
         <div className="options-grid">
+          {activeTab === "english_learn" && (
+            <div className="option-box">
+              <label htmlFor="english-level-select" className="option-label">
+                Heerka Ardayga Ee Ingiriisiga
+              </label>
+              <select
+                id="english-level-select"
+                value={level}
+                onChange={(e) => setLevel(e.target.value)}
+                className="select-input"
+              >
+                <option value="beginner">Bilow (Beginner — A1/A2)</option>
+                <option value="intermediate">Dhexdhexaad (Intermediate — B1/B2)</option>
+                <option value="advanced">Sare (Advanced — C1/C2)</option>
+              </select>
+              <p className="option-hint">
+                Wuxuu la jaanqaadayaa sharraxaadda iyo tusaalooyinka heerka ardayga.
+              </p>
+            </div>
+          )}
+
           {activeTab === "quiz" && (
             <div className="option-box">
               <div className="option-top">
@@ -275,32 +355,38 @@ export default function HomePage() {
             </div>
           )}
 
-          <div className="option-box">
-            <label htmlFor="language-select" className="option-label">
-              Luqadda Jawaabta &amp; Fahanka
-            </label>
-            <select
-              id="language-select"
-              value={language}
-              onChange={(e) => setLanguage(e.target.value)}
-              className="select-input"
-            >
-              <option value="same">Sida luqadda faylka / su&apos;aasha (Auto)</option>
-              <option value="somali">Af-Soomaali</option>
-              <option value="english">English</option>
-            </select>
-            <p className="option-hint">
-              Dooro luqadda aad rabto in sharraxaadda lagu qoro.
-            </p>
-          </div>
+          {activeTab !== "english_learn" && (
+            <div className="option-box">
+              <label htmlFor="language-select" className="option-label">
+                Luqadda Jawaabta &amp; Fahanka
+              </label>
+              <select
+                id="language-select"
+                value={language}
+                onChange={(e) => setLanguage(e.target.value)}
+                className="select-input"
+              >
+                <option value="same">Sida luqadda faylka / su&apos;aasha (Auto)</option>
+                <option value="somali">Af-Soomaali</option>
+                <option value="english">English</option>
+              </select>
+              <p className="option-hint">
+                Dooro luqadda aad rabto in sharraxaadda lagu qoro.
+              </p>
+            </div>
+          )}
         </div>
 
         <div className="form-actions">
           <button type="submit" disabled={loading} className="btn-primary">
             {loading
-              ? activeTab === "explain"
+              ? activeTab === "english_learn"
+                ? "Waa la turjumayaa oo la sharraxayaa..."
+                : activeTab === "explain"
                 ? "Waa la sharraxayaa..."
                 : `Waa la farsamaynayaa (${questionCount} su'aal)...`
+              : activeTab === "english_learn"
+              ? "Turjun & Sharrax (English → Somali)"
               : activeTab === "explain"
               ? "Soo Saar Faahfaahin & Faham"
               : `Samee Summary & ${questionCount} Su'aalood`}
@@ -309,6 +395,65 @@ export default function HomePage() {
       </form>
 
       {error && <div className="error-banner">{error}</div>}
+
+      {englishResult && (
+        <section className="card explain-result-card">
+          <h2 className="section-heading">
+            Casharka Barashada Ingiriisiga ({LEVEL_LABELS[level] || englishResult.level})
+          </h2>
+
+          {englishResult.source_english && (
+            <div className="option-box" style={{ marginBottom: "14px" }}>
+              <p className="direct-answer-label">Qoraalka Ingiriisiga (English)</p>
+              <p className="summary-text" style={{ fontWeight: 600 }}>
+                {englishResult.source_english}
+              </p>
+            </div>
+          )}
+
+          {englishResult.somali_translation && (
+            <div className="direct-answer-box">
+              <p className="direct-answer-label">Turjumaadda Af-Soomaali (Somali Translation)</p>
+              <p className="direct-answer-text">{englishResult.somali_translation}</p>
+            </div>
+          )}
+
+          {englishResult.grammar_and_usage && (
+            <div className="math-card">
+              <h3 className="math-card-title">Naxwaha &amp; Sida Loo Isticmaalo (Af-Soomaali)</h3>
+              <p className="summary-text">{englishResult.grammar_and_usage}</p>
+            </div>
+          )}
+
+          {vocabList.length > 0 && (
+            <div style={{ marginTop: "18px" }}>
+              <h3 className="math-card-title">Ereyada Muhiimka Ah (Vocabulary)</h3>
+              <div className="vocab-grid">
+                {vocabList.map((v, idx) => (
+                  <div key={idx} className="vocab-card">
+                    <p className="vocab-word">{v.word}</p>
+                    <p className="vocab-meaning">{v.somali_meaning}</p>
+                    {v.example_en && <p className="vocab-example-en">{v.example_en}</p>}
+                    {v.example_so && <p className="vocab-example-so">{v.example_so}</p>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {practiceExamples.length > 0 && (
+            <div style={{ marginTop: "18px" }}>
+              <h3 className="math-card-title">Tusaalooyin Dheeraad Ah (Practice Examples)</h3>
+              {practiceExamples.map((ex, idx) => (
+                <div key={idx} className="example-pair">
+                  <p className="example-pair-en">{ex.english}</p>
+                  <p className="example-pair-so">{ex.somali}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
 
       {explanationResult && (
         <section className="card explain-result-card">

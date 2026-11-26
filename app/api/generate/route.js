@@ -1,19 +1,20 @@
-﻿export const maxDuration = 60;
-
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { GoogleGenAI, Type } from "@google/genai";
 import pdfParse from "pdf-parse";
 import mammoth from "mammoth";
 import JSZip from "jszip";
 
+export const maxDuration = 60;
+
 const MAX_FILE_SIZE_MB = 100;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 const MAX_CHARS = 90000;
 const MAX_DOCX_IMAGES = 12;
-const MAX_IMAGE_BYTES = 4 * 1024 * 1024; // 4 MB per image
+const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
 const MIN_QUESTIONS = 1;
 const MAX_QUESTIONS = 100;
 const ALLOWED_LANGUAGES = ["same", "somali", "english"];
+const ALLOWED_LEVELS = ["beginner", "intermediate", "advanced"];
 
 const MODEL_CANDIDATES = [
   "gemini-3.5-flash-lite",
@@ -80,7 +81,6 @@ function repairInvalidJsonEscapes(str) {
         i += 2;
         continue;
       }
-      // Escape invalid JSON backslash such as \frac or \times
       out += "\\\\" + next;
       i += 2;
       continue;
@@ -143,7 +143,7 @@ async function extractDocxImages(buffer) {
       });
     }
   } catch {
-    // Ignore zip image extraction errors and continue with text if available
+    // Ignore zip image extraction errors
   }
   return images;
 }
@@ -194,6 +194,48 @@ const QUIZ_SCHEMA = {
     },
   },
   required: ["summary", "math_summary", "questions"],
+};
+
+const ENGLISH_LEARN_SCHEMA = {
+  type: Type.OBJECT,
+  properties: {
+    level: { type: Type.STRING },
+    source_english: { type: Type.STRING },
+    somali_translation: { type: Type.STRING },
+    grammar_and_usage: { type: Type.STRING },
+    vocabulary: {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          word: { type: Type.STRING },
+          somali_meaning: { type: Type.STRING },
+          example_en: { type: Type.STRING },
+          example_so: { type: Type.STRING },
+        },
+        required: ["word", "somali_meaning", "example_en", "example_so"],
+      },
+    },
+    practice_examples: {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          english: { type: Type.STRING },
+          somali: { type: Type.STRING },
+        },
+        required: ["english", "somali"],
+      },
+    },
+  },
+  required: [
+    "level",
+    "source_english",
+    "somali_translation",
+    "grammar_and_usage",
+    "vocabulary",
+    "practice_examples",
+  ],
 };
 
 async function generateWithFallback(ai, contents, responseSchema) {
@@ -256,11 +298,39 @@ function buildSourceBlock({ trimmedText = "", hasImages = false, isPdfDirect = f
   return "";
 }
 
+function buildEnglishLearnPrompt({ englishInput, level, sourceBlock }) {
+  const levelGuide = {
+    beginner:
+      "Heerka ardayga waa Bilow (Beginner / A1-A2): adeegso sharraxaad Af-Soomaali ah oo aad u fudud, ereyo aasaasi ah, iyo tusaalooyin gaagaaban oo maalinle ah.",
+    intermediate:
+      "Heerka ardayga waa Dhexdhexaad (Intermediate / B1-B2): bixi sharraxaad Af-Soomaali ah oo dhexdhexaad ah, sharrax qaab-dhismeedka jumladaha/tenses-ka, iyo tusaalooyin faa'iido leh.",
+    advanced:
+      "Heerka ardayga waa Sare (Advanced / C1-C2): bixi sharraxaad Af-Soomaali ah oo qotodheer, sharrax nuances/idioms/collocations/register, iyo tusaalooyin horumarsan.",
+  };
+
+  return `
+Waxaad tahay macallin Ingiriisi iyo Af-Soomaali oo ardayga ka caawinaya barashada luqadda Ingiriisiga.
+${levelGuide[level] || levelGuide.intermediate}
+
+Haddii ardaygu soo qoray qoraal/jumlad/erey Ingiriisi ah, ku salayn taas; haddii uu soo geliyay fayl oo uusan qoraal gaar ah qorin, kasoo saar qoraal Ingiriisi ah oo waxbarasho ah faylka.
+U turjun qoraalka Ingiriisiga ah Af-Soomaali sax ah oo macno leh (ha noqon turjumaad eray-erey ah oo qallafsan).
+Sharrax naxwaha iyo isticmaalka (grammar_and_usage) Af-Soomaali.
+Soo saar ereyo muhiim ah (vocabulary: 3 ilaa 8 erey) oo leh macnahooda Af-Soomaali iyo tusaale Ingiriisi ah + turjumaaddiisa Af-Soomaali.
+Soo saar tusaalooyin dheeraad ah (practice_examples: 2 ilaa 4 jumladood) oo ku habboon heerka ardayga.
+
+Qoraalka/su'aasha ardayga:
+"""
+${englishInput}
+"""
+${sourceBlock}
+`;
+}
+
 function buildExplainPrompt({ studentQuestion, langInstruction, sourceBlock }) {
   return `
 Ardayga wuxuu weydiiyay su'aashan hoose. Ha samayn su'aalo doorasho ah (multiple choice) ama A/B/C/D.
 Si toos ah uga jawaab su'aasha ardayga adigoo siinaya sharraxaad faahfaahsan, faham fudud, iyo xisaab tallaabo-tallaabo ah haddii su'aashu xisaab leedahay.
-Qor xisaabta adigoo adeegsanaya calaamado caadi ah (sida +, -, *, /, ^, =, x^2) oo aan lahayn backslash (\) aan loo baahnayn.
+Qor xisaabta adigoo adeegsanaya calaamado caadi ah (sida +, -, *, /, ^, =, x^2) oo aan lahayn backslash (\\) aan loo baahnayn.
 
 Su'aasha ardayga:
 """
@@ -276,7 +346,7 @@ ${sourceBlock}
 function buildQuizPrompt({ questionCount, langInstruction, sourceBlock }) {
   return `
 Akhri xogtan hoose, kadibna samee koobid iyo ${questionCount} su'aalood oo doorasho ah (multiple choice) oo ku salaysan faylkan.
-Qor xisaabta adigoo adeegsanaya calaamado caadi ah (sida +, -, *, /, ^, =, x^2) oo aan lahayn backslash (\) aan loo baahnayn.
+Qor xisaabta adigoo adeegsanaya calaamado caadi ah (sida +, -, *, /, ^, =, x^2) oo aan lahayn backslash (\\) aan loo baahnayn.
 
 Tilmaanta luqadda:
 ${langInstruction}
@@ -298,6 +368,9 @@ export async function POST(req) {
 
     const mode = String(formData.get("mode") || "quiz").toLowerCase();
     const studentQuestion = String(formData.get("studentQuestion") || "").trim();
+    const englishInput = String(formData.get("englishInput") || "").trim();
+    const rawLevel = String(formData.get("level") || "intermediate").toLowerCase();
+    const level = ALLOWED_LEVELS.includes(rawLevel) ? rawLevel : "intermediate";
     const file = formData.get("file");
 
     const parsedCount = Number.parseInt(String(formData.get("questionCount") || "10"), 10);
@@ -309,61 +382,85 @@ export async function POST(req) {
     const language = ALLOWED_LANGUAGES.includes(rawLang) ? rawLang : "same";
     const langInstruction = getLanguageInstruction(language);
 
+    let sourceBlock = "";
+    let mediaParts = [];
+
+    if (file && file.size > 0) {
+      if (file.size > MAX_FILE_SIZE_BYTES) {
+        return NextResponse.json(
+          { error: `Faylku wuxuu ka weyn yahay ${MAX_FILE_SIZE_MB} MB.` },
+          { status: 400 }
+        );
+      }
+
+      const arrayBuffer = await file.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+      const fileName = file.name.toLowerCase();
+
+      if (fileName.endsWith(".pdf")) {
+        let extractedText = "";
+        try {
+          const pdfData = await pdfParse(buffer);
+          extractedText = (pdfData.text || "").replace(/\s+/g, " ").trim();
+        } catch {
+          extractedText = "";
+        }
+
+        if (extractedText.length >= 120) {
+          sourceBlock = buildSourceBlock({ trimmedText: extractedText.slice(0, MAX_CHARS) });
+        } else {
+          mediaParts = [
+            {
+              inlineData: {
+                mimeType: "application/pdf",
+                data: buffer.toString("base64"),
+              },
+            },
+          ];
+          sourceBlock = buildSourceBlock({ isPdfDirect: true });
+        }
+      } else if (fileName.endsWith(".docx")) {
+        const docData = await mammoth.extractRawText({ buffer });
+        const extractedText = (docData.value || "").replace(/\s+/g, " ").trim();
+        const images = await extractDocxImages(buffer);
+        mediaParts = images;
+        sourceBlock = buildSourceBlock({
+          trimmedText: extractedText.slice(0, MAX_CHARS),
+          hasImages: images.length > 0,
+        });
+      } else if (mode !== "english_learn") {
+        return NextResponse.json(
+          { error: "Kaliya waxaa la aqbalayaa faylasha .pdf iyo .docx." },
+          { status: 400 }
+        );
+      }
+    }
+
+    if (mode === "english_learn") {
+      if (!englishInput && !sourceBlock && mediaParts.length === 0) {
+        return NextResponse.json(
+          { error: "Fadlan qor qoraal/jumlad Ingiriisi ah ama soo geli fayl." },
+          { status: 400 }
+        );
+      }
+
+      const promptText = buildEnglishLearnPrompt({
+        englishInput: englishInput || "Extract and teach English from the attached file.",
+        level,
+        sourceBlock,
+      });
+      const contents = mediaParts.length > 0 ? [...mediaParts, promptText] : promptText;
+      const response = await generateWithFallback(ai, contents, ENGLISH_LEARN_SCHEMA);
+      const result = parseJsonSafe(response.text);
+      return NextResponse.json(result);
+    }
+
     if (mode === "explain") {
       if (!studentQuestion) {
         return NextResponse.json(
           { error: "Fadlan qor su'aasha aad rabto in laguu sharraxo." },
           { status: 400 }
         );
-      }
-
-      let sourceBlock = "";
-      let mediaParts = [];
-
-      if (file && file.size > 0) {
-        if (file.size > MAX_FILE_SIZE_BYTES) {
-          return NextResponse.json(
-            { error: `Faylku wuxuu ka weyn yahay ${MAX_FILE_SIZE_MB} MB.` },
-            { status: 400 }
-          );
-        }
-
-        const arrayBuffer = await file.arrayBuffer();
-        const buffer = Buffer.from(arrayBuffer);
-        const fileName = file.name.toLowerCase();
-
-        if (fileName.endsWith(".pdf")) {
-          let extractedText = "";
-          try {
-            const pdfData = await pdfParse(buffer);
-            extractedText = (pdfData.text || "").replace(/\s+/g, " ").trim();
-          } catch {
-            extractedText = "";
-          }
-
-          if (extractedText.length >= 120) {
-            sourceBlock = buildSourceBlock({ trimmedText: extractedText.slice(0, MAX_CHARS) });
-          } else {
-            mediaParts = [
-              {
-                inlineData: {
-                  mimeType: "application/pdf",
-                  data: buffer.toString("base64"),
-                },
-              },
-            ];
-            sourceBlock = buildSourceBlock({ isPdfDirect: true });
-          }
-        } else if (fileName.endsWith(".docx")) {
-          const docData = await mammoth.extractRawText({ buffer });
-          const extractedText = (docData.value || "").replace(/\s+/g, " ").trim();
-          const images = await extractDocxImages(buffer);
-          mediaParts = images;
-          sourceBlock = buildSourceBlock({
-            trimmedText: extractedText.slice(0, MAX_CHARS),
-            hasImages: images.length > 0,
-          });
-        }
       }
 
       const promptText = buildExplainPrompt({
@@ -377,79 +474,15 @@ export async function POST(req) {
       return NextResponse.json(result);
     }
 
-    if (!file) {
+    if (!file || file.size === 0) {
       return NextResponse.json(
         { error: "Fadlan dooro fayl PDF (.pdf) ama Word (.docx) ah." },
         { status: 400 }
       );
     }
 
-    if (file.size > MAX_FILE_SIZE_BYTES) {
-      return NextResponse.json(
-        { error: `Faylku wuxuu ka weyn yahay ${MAX_FILE_SIZE_MB} MB.` },
-        { status: 400 }
-      );
-    }
-
-    const arrayBuffer = await file.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-    const fileName = file.name.toLowerCase();
-
-    let contents;
-
-    if (fileName.endsWith(".pdf")) {
-      let extractedText = "";
-      try {
-        const pdfData = await pdfParse(buffer);
-        extractedText = (pdfData.text || "").replace(/\s+/g, " ").trim();
-      } catch {
-        extractedText = "";
-      }
-
-      if (extractedText.length >= 120) {
-        const sourceBlock = buildSourceBlock({ trimmedText: extractedText.slice(0, MAX_CHARS) });
-        contents = buildQuizPrompt({ questionCount, langInstruction, sourceBlock });
-      } else {
-        const base64Pdf = buffer.toString("base64");
-        const sourceBlock = buildSourceBlock({ isPdfDirect: true });
-        contents = [
-          {
-            inlineData: {
-              mimeType: "application/pdf",
-              data: base64Pdf,
-            },
-          },
-          buildQuizPrompt({ questionCount, langInstruction, sourceBlock }),
-        ];
-      }
-    } else if (fileName.endsWith(".docx")) {
-      const docData = await mammoth.extractRawText({ buffer });
-      const extractedText = (docData.value || "").replace(/\s+/g, " ").trim();
-      const images = await extractDocxImages(buffer);
-
-      if (extractedText.length < 50 && images.length === 0) {
-        return NextResponse.json(
-          {
-            error:
-              "Qoraal ama sawirro la akhriyi karo lagama helin faylkan Word-ka ah.",
-          },
-          { status: 400 }
-        );
-      }
-
-      const sourceBlock = buildSourceBlock({
-        trimmedText: extractedText.slice(0, MAX_CHARS),
-        hasImages: images.length > 0,
-      });
-      const promptText = buildQuizPrompt({ questionCount, langInstruction, sourceBlock });
-      contents = images.length > 0 ? [...images, promptText] : promptText;
-    } else {
-      return NextResponse.json(
-        { error: "Kaliya waxaa la aqbalayaa faylasha .pdf iyo .docx." },
-        { status: 400 }
-      );
-    }
-
+    const promptText = buildQuizPrompt({ questionCount, langInstruction, sourceBlock });
+    const contents = mediaParts.length > 0 ? [...mediaParts, promptText] : promptText;
     const response = await generateWithFallback(ai, contents, QUIZ_SCHEMA);
     const result = parseJsonSafe(response.text);
     if (Array.isArray(result.questions) && result.questions.length > questionCount) {
@@ -465,4 +498,3 @@ export async function POST(req) {
     );
   }
 }
-
